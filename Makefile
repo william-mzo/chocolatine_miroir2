@@ -14,8 +14,9 @@ tests_run:
 	echo "tests ok"
 
 clean:
-	rm -f test
+	rm -f *.o
 
 fclean: clean
+	rm -f test
 
 re: fclean all
