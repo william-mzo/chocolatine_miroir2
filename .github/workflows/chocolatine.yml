@@ -1,0 +1,103 @@
+name: Chocolatine
+
+on:
+  push:
+    branches-ignore:
+      - 'no-ga/**'
+  pull_request:
+    branches-ignore:
+      - 'no-ga/**'
+
+env:
+  MIRROR_SSH_URL: git@github.com:william-mzo/chocolatine_miroir2.git
+  EXECUTABLES: test
+
+jobs:
+  check_compilation_and_coding_style:
+    name: Coding style & compilation
+    runs-on: ubuntu-latest
+    if: ${{ github.event.repository.ssh_url != env.MIRROR_SSH_URL }}
+    container: epitechcontent/epitest-docker
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Banana check
+        run: banana-check-repo
+
+      - name: Make
+        run: make
+        timeout-minutes: 2
+        env:
+          CC: epiclang
+
+      - name: Show coding style errors
+        if: always()
+        run: |
+          if [ -f coding-style-reports.log ]; then
+            while IFS= read -r line; do
+              file=$(echo "$line" | cut -d: -f1 | sed 's|^\./||')
+              linenum=$(echo "$line" | cut -d: -f2)
+              severity=$(echo "$line" | cut -d: -f3 | xargs)
+              msg=$(echo "$line" | cut -d: -f4- | xargs)
+              echo "::error file=${file},line=${linenum}::${severity} coding style error: ${msg}"
+            done < coding-style-reports.log
+          fi
+
+      - name: Fail if errors
+        if: always()
+        run: |
+          if [ -f coding-style-reports.log ] && [ -s coding-style-reports.log ]; then
+            exit 1
+          fi
+
+      - name: Make clean
+        run: make clean
+
+      - name: Check executables
+        run: |
+          for exec in $(echo "$EXECUTABLES" | tr ',' ' '); do
+            if [ ! -f "$exec" ]; then
+              echo "::error file=${exec},line=0::Executable '${exec}' not found"
+              exit 1
+            fi
+            if [ ! -x "$exec" ]; then
+              echo "::error file=${exec},line=0::Executable '${exec}' is not executable"
+              exit 1
+            fi
+          done
+
+  run_tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    needs: check_compilation_and_coding_style
+    if: ${{ github.event.repository.ssh_url != env.MIRROR_SSH_URL }}
+    container: epitechcontent/epitest-docker
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run tests
+        run: make tests_run
+        timeout-minutes: 2
+
+  push_to_mirror:
+    name: Mirror
+    runs-on: ubuntu-latest
+    needs: run_tests
+    if: ${{ github.event_name == 'push' && github.event.repository.ssh_url != env.MIRROR_SSH_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push mirror
+        uses: pixta-dev/repository-mirroring-action@v1
+        with:
+          target_repo_url: ${{ env.MIRROR_SSH_URL }}
+          ssh_private_key: ${{ secrets.GIT_SSH_PRIVATE_KEY }}
